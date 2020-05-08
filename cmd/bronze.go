@@ -6,10 +6,30 @@ import (
 	"os"
 )
 
+// Pac represents a Pac man (or woman)
+type Pac struct {
+	id                              int
+	player                          int
+	x, y                            int
+	typeID                          string
+	speedTurnsLeft, abilityCooldown int
+}
+
+// Pellet represents a pellet with a location and point value
+type Pellet struct {
+	x, y, value int
+}
+
+// GameState represents a snapshot of the game at a point in time
+type GameState struct {
+	scores  []int
+	pacs    []Pac
+	pellets []Pellet
+}
+
 /**
  * Grab the pellets as fast as you can!
  **/
-
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1000000), 1000000)
@@ -33,39 +53,32 @@ func main() {
 		scanner.Scan()
 		fmt.Sscan(scanner.Text(), &visiblePacCount)
 
-		var myPacIds []int
+		var pacs []Pac
 
 		for i := 0; i < visiblePacCount; i++ {
 			// pacID: pac number (unique within a team)
-			// mine: true if this pac is yours
+			// player: 0 if this pac is yours
 			// x: position in the grid
 			// y: position in the grid
 			// typeId: unused in wood leagues
 			// speedTurnsLeft: unused in wood leagues
 			// abilityCooldown: unused in wood leagues
 			var pacID int
-			var mine bool
-			var _mine int
+			var player int
 			var x, y int
 			var typeID string
 			var speedTurnsLeft, abilityCooldown int
 			scanner.Scan()
-			fmt.Sscan(scanner.Text(), &pacID, &_mine, &x, &y, &typeID, &speedTurnsLeft, &abilityCooldown)
-			mine = _mine != 0
+			fmt.Sscan(scanner.Text(), &pacID, &player, &x, &y, &typeID, &speedTurnsLeft, &abilityCooldown)
 
-			if mine {
-				myPacIds = append(myPacIds, pacID)
-			}
+			pacs = append(pacs, Pac{pacID, player, x, y, typeID, speedTurnsLeft, abilityCooldown})
 		}
 		// visiblePelletCount: all pellets in sight
 		var visiblePelletCount int
 		scanner.Scan()
 		fmt.Sscan(scanner.Text(), &visiblePelletCount)
 
-		type Coord struct {
-			X, Y int
-		}
-		var moves []Coord
+		var pellets []Pellet
 
 		for i := 0; i < visiblePelletCount; i++ {
 			// value: amount of points this pellet is worth
@@ -73,19 +86,29 @@ func main() {
 			scanner.Scan()
 			fmt.Sscan(scanner.Text(), &x, &y, &value)
 
-			moves = append(moves, Coord{x, y})
+			pellets = append(pellets, Pellet{x, y, value})
 		}
+
+		gameState := GameState{[]int{myScore, opponentScore}, pacs, pellets}
 
 		// fmt.Fprintln(os.Stderr, "Debug messages...")
 		var cmd string
-		for i, myPacID := range myPacIds {
-			move := moves[len(moves)/len(myPacIds)*i]
+		var myPacs []Pac
+		for _, pac := range gameState.pacs {
+			if pac.player == 1 {
+				fmt.Fprintln(os.Stderr, pac)
+				myPacs = append(myPacs, pac)
+			}
+		}
+		for i, pac := range myPacs {
+			pellet := gameState.pellets[len(pellets)/len(myPacs)*i]
 			if i > 0 {
 				cmd = cmd + " | "
 			}
-			cmd = cmd + fmt.Sprintf("MOVE %v %v %v", myPacID, move.X, move.Y) // MOVE <pacId> <x> <y>
+			cmd = cmd + fmt.Sprint("MOVE ", pac.id, pellet.x, pellet.y, pac.id, " ", pac.typeID) // MOVE <pacId> <x> <y>
 		}
 
+		fmt.Fprintln(os.Stderr, cmd)
 		fmt.Println(cmd)
 	}
 }
