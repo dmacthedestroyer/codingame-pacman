@@ -20,11 +20,27 @@ type Pellet struct {
 	x, y, value int
 }
 
+// Cell represents a single wall or floor of the game area
+type Cell struct {
+	value rune
+}
+
+// GameMap represents the walls and floors of the game area
+type GameMap struct {
+	width, height int
+	cells         []Cell
+}
+
 // GameState represents a snapshot of the game at a point in time
 type GameState struct {
-	scores  []int
-	pacs    []Pac
-	pellets []Pellet
+	gameMap        GameMap
+	scores         []int
+	visiblePacs    []Pac
+	visiblePellets []Pellet
+}
+
+func debug(a ...interface{}) {
+	fmt.Fprintln(os.Stderr, a...)
 }
 
 /**
@@ -39,11 +55,19 @@ func main() {
 	var width, height int
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &width, &height)
+	var cells []Cell
 
 	for i := 0; i < height; i++ {
 		scanner.Scan()
-		//row := scanner.Text() // one line of the grid: space " " is floor, pound "#" is wall
+		row := scanner.Text() // one line of the grid: space " " is floor, pound "#" is wall
+		debug(row)
+		for _, cellValue := range row {
+			cells = append(cells, Cell{cellValue})
+		}
 	}
+
+	gameMap := GameMap{width, height, cells}
+
 	for {
 		var myScore, opponentScore int
 		scanner.Scan()
@@ -53,16 +77,9 @@ func main() {
 		scanner.Scan()
 		fmt.Sscan(scanner.Text(), &visiblePacCount)
 
-		var pacs []Pac
+		var visiblePacs []Pac
 
 		for i := 0; i < visiblePacCount; i++ {
-			// pacID: pac number (unique within a team)
-			// player: 0 if this pac is yours
-			// x: position in the grid
-			// y: position in the grid
-			// typeId: unused in wood leagues
-			// speedTurnsLeft: unused in wood leagues
-			// abilityCooldown: unused in wood leagues
 			var pacID int
 			var player int
 			var x, y int
@@ -71,14 +88,14 @@ func main() {
 			scanner.Scan()
 			fmt.Sscan(scanner.Text(), &pacID, &player, &x, &y, &typeID, &speedTurnsLeft, &abilityCooldown)
 
-			pacs = append(pacs, Pac{pacID, player, x, y, typeID, speedTurnsLeft, abilityCooldown})
+			visiblePacs = append(visiblePacs, Pac{pacID, player, x, y, typeID, speedTurnsLeft, abilityCooldown})
 		}
 		// visiblePelletCount: all pellets in sight
 		var visiblePelletCount int
 		scanner.Scan()
 		fmt.Sscan(scanner.Text(), &visiblePelletCount)
 
-		var pellets []Pellet
+		var visiblePellets []Pellet
 
 		for i := 0; i < visiblePelletCount; i++ {
 			// value: amount of points this pellet is worth
@@ -86,29 +103,30 @@ func main() {
 			scanner.Scan()
 			fmt.Sscan(scanner.Text(), &x, &y, &value)
 
-			pellets = append(pellets, Pellet{x, y, value})
+			visiblePellets = append(visiblePellets, Pellet{x, y, value})
 		}
 
-		gameState := GameState{[]int{myScore, opponentScore}, pacs, pellets}
+		gameState := GameState{gameMap, []int{myScore, opponentScore}, visiblePacs, visiblePellets}
 
 		// fmt.Fprintln(os.Stderr, "Debug messages...")
 		var cmd string
 		var myPacs []Pac
-		for _, pac := range gameState.pacs {
+		// find all of my pacs from the visible collection
+		for _, pac := range gameState.visiblePacs {
 			if pac.player == 1 {
-				fmt.Fprintln(os.Stderr, pac)
 				myPacs = append(myPacs, pac)
 			}
 		}
+		// equally divide the visible pellets amongst all of my pacs (even though the order of the pellets and the position of the pacs are meaningless)
 		for i, pac := range myPacs {
-			pellet := gameState.pellets[len(pellets)/len(myPacs)*i]
+			pellet := gameState.visiblePellets[len(visiblePellets)/len(myPacs)*i]
 			if i > 0 {
 				cmd = cmd + " | "
 			}
 			cmd = cmd + fmt.Sprint("MOVE ", pac.id, pellet.x, pellet.y, pac.id, " ", pac.typeID) // MOVE <pacId> <x> <y>
 		}
 
-		fmt.Fprintln(os.Stderr, cmd)
+		debug(cmd)
 		fmt.Println(cmd)
 	}
 }
