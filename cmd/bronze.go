@@ -9,18 +9,28 @@ import (
 	"strings"
 )
 
+// Coord is a point in cartesian space
+type Coord struct{ x, y int }
+
+// DistanceSquared calculates the squared distance between this Coord and the given Coord
+func (coord Coord) DistanceSquared(other Coord) int {
+	dx, dy := coord.x-other.x, coord.y-other.y
+	return dx*dx + dy*dy
+}
+
 // Pac represents a Pac man (or woman)
 type Pac struct {
 	id                              int
 	player                          int
-	x, y                            int
+	pos                             Coord
 	typeID                          string
 	speedTurnsLeft, abilityCooldown int
 }
 
 // Pellet represents a pellet with a location and point value
 type Pellet struct {
-	x, y, value int
+	pos   Coord
+	value int
 }
 
 // Cell represents a single wall or floor of the game area
@@ -63,8 +73,7 @@ func Bucketize(x, numBuckets, width int) int {
 func SortPelletsByProximity(pellets []Pellet, pac Pac) {
 	sort.Slice(pellets, func(i, j int) bool {
 		iPellet, jPellet := pellets[i], pellets[j]
-		idx, idy, jdx, jdy := pac.x-iPellet.x, pac.y-iPellet.y, pac.x-jPellet.x, +pac.y-jPellet.y
-		iDist, jDist := idx*idx+idy*idy, jdx*jdx+jdy*jdy
+		iDist, jDist := iPellet.pos.DistanceSquared(pac.pos), jPellet.pos.DistanceSquared(pac.pos)
 		if iDist < jDist {
 			return true
 		}
@@ -83,7 +92,7 @@ func (bot DansLilHeuristicBot) makeCommand(gameState GameData) string {
 
 	pelletsByArea := make([][]Pellet, len(myPacs))
 	for _, pellet := range gameState.visiblePellets {
-		key := Bucketize(pellet.x, len(myPacs), gameState.gameMap.width)
+		key := Bucketize(pellet.pos.x, len(myPacs), gameState.gameMap.width)
 		pelletsByArea[key] = append(pelletsByArea[key], pellet)
 	}
 
@@ -104,10 +113,10 @@ func (bot DansLilHeuristicBot) makeCommand(gameState GameData) string {
 					return rand.Intn(x/len(myPacs)) + (iPac * x / len(myPacs))
 				}
 				x, y := coord(gameState.gameMap.width), coord(gameState.gameMap.height)
-				pellet = Pellet{x, y, 1}
+				pellet = Pellet{Coord{x, y}, 1}
 				status = joinStrings("S", x, y)
 			}
-			actions = append(actions, joinStrings("MOVE", pac.id, pellet.x, pellet.y, iPac, status))
+			actions = append(actions, joinStrings("MOVE", pac.id, pellet.pos, iPac, status))
 		}
 	}
 
@@ -179,7 +188,7 @@ func main() {
 			scanner.Scan()
 			fmt.Sscan(scanner.Text(), &pacID, &player, &x, &y, &typeID, &speedTurnsLeft, &abilityCooldown)
 
-			visiblePacs = append(visiblePacs, Pac{pacID, player, x, y, typeID, speedTurnsLeft, abilityCooldown})
+			visiblePacs = append(visiblePacs, Pac{pacID, player, Coord{x, y}, typeID, speedTurnsLeft, abilityCooldown})
 		}
 		// visiblePelletCount: all pellets in sight
 		var visiblePelletCount int
@@ -194,7 +203,7 @@ func main() {
 			scanner.Scan()
 			fmt.Sscan(scanner.Text(), &x, &y, &value)
 
-			visiblePellets = append(visiblePellets, Pellet{x, y, value})
+			visiblePellets = append(visiblePellets, Pellet{Coord{x, y}, value})
 		}
 
 		cmd := agent.makeCommand(GameData{gameRound, gameMap, []int{myScore, opponentScore}, visiblePacs, visiblePellets})
