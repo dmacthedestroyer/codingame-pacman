@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -58,6 +59,19 @@ func Bucketize(x, numBuckets, width int) int {
 	return numBuckets - 1
 }
 
+// SortPelletsByProximity sorts the pellets by distance squared to the given Pac
+func SortPelletsByProximity(pellets []Pellet, pac Pac) {
+	sort.Slice(pellets, func(i, j int) bool {
+		iPellet, jPellet := pellets[i], pellets[j]
+		idx, idy, jdx, jdy := pac.x-iPellet.x, pac.y-iPellet.y, pac.x-jPellet.x, +pac.y-jPellet.y
+		iDist, jDist := idx*idx+idy*idy, jdx*jdx+jdy*jdy
+		if iDist < jDist {
+			return true
+		}
+		return false
+	})
+}
+
 func (bot DansLilHeuristicBot) makeCommand(gameState GameData) string {
 	var myPacs []Pac
 	// find all of my pacs from the visible collection
@@ -70,7 +84,6 @@ func (bot DansLilHeuristicBot) makeCommand(gameState GameData) string {
 	pelletsByArea := make([][]Pellet, len(myPacs))
 	for _, pellet := range gameState.visiblePellets {
 		key := Bucketize(pellet.x, len(myPacs), gameState.gameMap.width)
-		debug(fmt.Sprintf("%v / (%v / %v) =  %v", pellet.x, gameState.gameMap.width, len(myPacs), key))
 		pelletsByArea[key] = append(pelletsByArea[key], pellet)
 	}
 
@@ -83,6 +96,7 @@ func (bot DansLilHeuristicBot) makeCommand(gameState GameData) string {
 			var pellet Pellet
 			var status string
 			if len(pelletsByArea[iPac]) > 0 {
+				SortPelletsByProximity(pelletsByArea[iPac], pac)
 				pellet = pelletsByArea[iPac][0]
 				status = joinStrings("P", len(pelletsByArea[iPac]))
 			} else {
