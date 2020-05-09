@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math/rand"
 	"os"
+	"strings"
 )
 
 // Pac represents a Pac man (or woman)
@@ -31,13 +33,85 @@ type GameMap struct {
 	cells         []Cell
 }
 
-// GameState represents a snapshot of the game at a point in time
-type GameState struct {
+// GameData represents a snapshot of the game at a point in time
+type GameData struct {
+	round          int
 	gameMap        GameMap
 	scores         []int
 	visiblePacs    []Pac
 	visiblePellets []Pellet
 }
+
+// Agent decides on a command given game data
+type Agent interface {
+	makeCommand(GameData) string
+}
+
+// DansLilHeuristicBot is just a lil guy tryina eat some pellets
+type DansLilHeuristicBot struct{}
+
+// Bucketize returns the bucket (0...numBuckets-1) that value x belongs in, if evenly distributed amongst width
+func Bucketize(x, numBuckets, width int) int {
+	if bucket := x / (width / numBuckets); bucket < numBuckets {
+		return bucket
+	}
+	return numBuckets - 1
+}
+
+func (bot DansLilHeuristicBot) makeCommand(gameState GameData) string {
+	var myPacs []Pac
+	// find all of my pacs from the visible collection
+	for _, pac := range gameState.visiblePacs {
+		if pac.player == 1 {
+			myPacs = append(myPacs, pac)
+		}
+	}
+
+	pelletsByArea := make([][]Pellet, len(myPacs))
+	for _, pellet := range gameState.visiblePellets {
+		key := Bucketize(pellet.x, len(myPacs), gameState.gameMap.width)
+		debug(fmt.Sprintf("%v / (%v / %v) =  %v", pellet.x, gameState.gameMap.width, len(myPacs), key))
+		pelletsByArea[key] = append(pelletsByArea[key], pellet)
+	}
+
+	var actions []string
+	for iPac, pac := range myPacs {
+		if pac.abilityCooldown <= 0 {
+			// they're speedy lil devils, these Pacs
+			actions = append(actions, fmt.Sprint("SPEED ", pac.id))
+		} else {
+			var pellet Pellet
+			var status string
+			if len(pelletsByArea[iPac]) > 0 {
+				pellet = pelletsByArea[iPac][0]
+				status = joinStrings("P", len(pelletsByArea[iPac]))
+			} else {
+				coord := func(x int) int {
+					return rand.Intn(x/len(myPacs)) + (iPac * x / len(myPacs))
+				}
+				x, y := coord(gameState.gameMap.width), coord(gameState.gameMap.height)
+				pellet = Pellet{x, y, 1}
+				status = joinStrings("S", x, y)
+			}
+			actions = append(actions, joinStrings("MOVE", pac.id, pellet.x, pellet.y, iPac, status))
+		}
+	}
+
+	return strings.Join(actions, "|")
+}
+
+func joinStrings(elems ...interface{}) string {
+	elemStrings := make([]string, len(elems))
+	for i, elem := range elems {
+		elemStrings[i] = fmt.Sprintf("%v", elem)
+	}
+
+	return strings.Join(elemStrings, " ")
+}
+
+//-----------------------------------------------------------------------------------
+// main stuff
+//-----------------------------------------------------------------------------------
 
 func debug(a ...interface{}) {
 	fmt.Fprintln(os.Stderr, a...)
@@ -47,6 +121,8 @@ func debug(a ...interface{}) {
  * Grab the pellets as fast as you can!
  **/
 func main() {
+	agent := DansLilHeuristicBot{}
+
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1000000), 1000000)
 
@@ -67,6 +143,7 @@ func main() {
 	}
 
 	gameMap := GameMap{width, height, cells}
+	var gameRound = 0
 
 	for {
 		var myScore, opponentScore int
@@ -106,27 +183,10 @@ func main() {
 			visiblePellets = append(visiblePellets, Pellet{x, y, value})
 		}
 
-		gameState := GameState{gameMap, []int{myScore, opponentScore}, visiblePacs, visiblePellets}
-
-		// fmt.Fprintln(os.Stderr, "Debug messages...")
-		var cmd string
-		var myPacs []Pac
-		// find all of my pacs from the visible collection
-		for _, pac := range gameState.visiblePacs {
-			if pac.player == 1 {
-				myPacs = append(myPacs, pac)
-			}
-		}
-		// equally divide the visible pellets amongst all of my pacs (even though the order of the pellets and the position of the pacs are meaningless)
-		for i, pac := range myPacs {
-			pellet := gameState.visiblePellets[len(visiblePellets)/len(myPacs)*i]
-			if i > 0 {
-				cmd = cmd + " | "
-			}
-			cmd = cmd + fmt.Sprint("MOVE ", pac.id, pellet.x, pellet.y, pac.id, " ", pac.typeID) // MOVE <pacId> <x> <y>
-		}
-
+		cmd := agent.makeCommand(GameData{gameRound, gameMap, []int{myScore, opponentScore}, visiblePacs, visiblePellets})
 		debug(cmd)
 		fmt.Println(cmd)
+
+		gameRound++
 	}
 }
