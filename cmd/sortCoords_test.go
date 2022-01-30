@@ -18,7 +18,7 @@ func TestSortCoordsByProximity(t *testing.T) {
 
 	for i, tt := range tests {
 		t.Run(fmt.Sprintf("%v", i), func(t *testing.T) {
-			SortCoordsByProximity(tt.coords, pos)
+			sortCoordsByProximity(tt.coords, pos)
 			if tt.coords[0] != tt.expected {
 				t.Errorf("expected first element to be %v, but was %v", tt.expected, tt.coords[0])
 			}

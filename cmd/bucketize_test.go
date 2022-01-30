@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-func bucketize(x, numPacs, width int) int {
-	return Bucketize(x, numPacs, width)
-}
-
 func TestBucketize(t *testing.T) {
 	tests := []struct{ x, numPacs, width, expected int }{
 		{0, 2, 10, 0},

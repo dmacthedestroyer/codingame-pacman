@@ -12,12 +12,6 @@ import (
 // Coord is a point in cartesian space
 type Coord struct{ x, y int }
 
-// DistanceSquared calculates the squared distance between this Coord and the given Coord
-func (coord Coord) DistanceSquared(other Coord) int {
-	dx, dy := coord.x-other.x, coord.y-other.y
-	return dx*dx + dy*dy
-}
-
 // Pac represents a Pac man (or woman)
 type Pac struct {
 	id                              int
@@ -110,6 +104,46 @@ type Agent interface {
 	makeCommand(GameData) string
 }
 
+//-----------------------------------------------------------------------------------
+// general utility stuff
+//-----------------------------------------------------------------------------------
+
+// sortCoordsByProximity sorts the pellets by distance squared to the given position
+func sortCoordsByProximity(coords []Coord, pos Coord) {
+	sort.Slice(coords, func(i, j int) bool {
+		iCoord, jCoord := coords[i], coords[j]
+		iDist, jDist := iCoord.distanceSquared(pos), jCoord.distanceSquared(pos)
+		return iDist < jDist
+	})
+}
+
+// distanceSquared calculates the squared distance between this Coord and the given Coord
+func (coord Coord) distanceSquared(other Coord) int {
+	dx, dy := coord.x-other.x, coord.y-other.y
+	return dx*dx + dy*dy
+}
+
+// bucketize returns the bucket (0...numBuckets-1) that value x belongs in, if evenly distributed amongst width
+func bucketize(x, numBuckets, width int) int {
+	if bucket := x / (width / numBuckets); bucket < numBuckets {
+		return bucket
+	}
+	return numBuckets - 1
+}
+
+func joinStrings(elems ...interface{}) string {
+	elemStrings := make([]string, len(elems))
+	for i, elem := range elems {
+		elemStrings[i] = fmt.Sprintf("%v", elem)
+	}
+
+	return strings.Join(elemStrings, " ")
+}
+
+//-----------------------------------------------------------------------------------
+// Bot implementation
+//-----------------------------------------------------------------------------------
+
 // DansLilHeuristicBot is just a lil guy tryina eat some pellets
 type DansLilHeuristicBot struct {
 	pelletValuesByPos []int
@@ -144,26 +178,6 @@ func (bot *DansLilHeuristicBot) update(gameData GameData) {
 	}
 }
 
-// Bucketize returns the bucket (0...numBuckets-1) that value x belongs in, if evenly distributed amongst width
-func Bucketize(x, numBuckets, width int) int {
-	if bucket := x / (width / numBuckets); bucket < numBuckets {
-		return bucket
-	}
-	return numBuckets - 1
-}
-
-// SortCoordsByProximity sorts the pellets by distance squared to the given Pac
-func SortCoordsByProximity(coords []Coord, pos Coord) {
-	sort.Slice(coords, func(i, j int) bool {
-		iCoord, jCoord := coords[i], coords[j]
-		iDist, jDist := iCoord.DistanceSquared(pos), jCoord.DistanceSquared(pos)
-		if iDist < jDist {
-			return true
-		}
-		return false
-	})
-}
-
 func (bot DansLilHeuristicBot) makeCommand(gameData GameData) string {
 	bot.update(gameData)
 
@@ -179,7 +193,7 @@ func (bot DansLilHeuristicBot) makeCommand(gameData GameData) string {
 	for pos, pelletValue := range bot.pelletValuesByPos {
 		if pelletValue > 0 {
 			coord := gameData.gameMap.GetCoord(pos)
-			key := Bucketize(coord.x, len(myPacs), gameData.gameMap.width)
+			key := bucketize(coord.x, len(myPacs), gameData.gameMap.width)
 			pelletsByArea[key] = append(pelletsByArea[key], coord)
 		}
 	}
@@ -194,7 +208,7 @@ func (bot DansLilHeuristicBot) makeCommand(gameData GameData) string {
 			var status string
 			// choose closest pellet
 			if len(pelletsByArea[iPac]) > 0 {
-				SortCoordsByProximity(pelletsByArea[iPac], pac.pos)
+				sortCoordsByProximity(pelletsByArea[iPac], pac.pos)
 				pos = pelletsByArea[iPac][0]
 				status = joinStrings("P", len(pelletsByArea[iPac]))
 			} else {
@@ -211,19 +225,6 @@ func (bot DansLilHeuristicBot) makeCommand(gameData GameData) string {
 	}
 
 	return strings.Join(actions, "|")
-}
-
-//-----------------------------------------------------------------------------------
-// general utility stuff
-//-----------------------------------------------------------------------------------
-
-func joinStrings(elems ...interface{}) string {
-	elemStrings := make([]string, len(elems))
-	for i, elem := range elems {
-		elemStrings[i] = fmt.Sprintf("%v", elem)
-	}
-
-	return strings.Join(elemStrings, " ")
 }
 
 //-----------------------------------------------------------------------------------
@@ -257,7 +258,6 @@ func main() {
 	for i := 0; i < height; i++ {
 		scanner.Scan()
 		row := scanner.Text() // one line of the grid: space " " is floor, pound "#" is wall
-		debug(row)
 		for _, cellValue := range row {
 			cells = append(cells, Cell{cellValue})
 		}
