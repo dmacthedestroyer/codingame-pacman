@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestInit(t *testing.T) {
+func TestInitSeedsPelletsOnAllFloorCells(t *testing.T) {
 	bot := DansLilHeuristicBot{}
 
 	bot.init(BuildGameMap(`
@@ -13,11 +13,11 @@ func TestInit(t *testing.T) {
 #   #
 #####`))
 
-	tests := []int{0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0}
-	if expected, actual := len(tests), len(bot.pelletValuesByPos); expected != actual {
+	expectedPelletValues := []int{0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0}
+	if expected, actual := len(expectedPelletValues), len(bot.pelletValuesByPos); expected != actual {
 		t.Errorf("expected length %v, but got %v", expected, actual)
 	} else {
-		for pos, tt := range tests {
+		for pos, tt := range expectedPelletValues {
 			t.Run(fmt.Sprint(pos), func(t *testing.T) {
 				if expected, actual := tt, bot.pelletValuesByPos[pos]; expected != actual {
 					t.Errorf("expected position %v to have pellet value %v, but got %v", pos, expected, actual)
@@ -47,7 +47,7 @@ func TestUpdate(t *testing.T) {
 
 	pacCoord := Coord{1, 1}
 	visiblePellets := []Pellet{{Coord{1, 3}, 1}}
-	bot.update(GameData{gameMap: gameMap, visiblePacs: []Pac{{player: 1, pos: pacCoord}}, visiblePellets: visiblePellets})
+	bot.update(GameData{gameMap: gameMap, visiblePacs: []Pac{{mine: true, pos: pacCoord}}, visiblePellets: visiblePellets})
 
 	tests := []struct {
 		pos           Coord

@@ -15,7 +15,7 @@ type Coord struct{ x, y int }
 // Pac represents a Pac man (or woman)
 type Pac struct {
 	id                              int
-	player                          int
+	mine                            bool
 	pos                             Coord
 	typeID                          string
 	speedTurnsLeft, abilityCooldown int
@@ -41,7 +41,7 @@ type GameMap struct {
 
 // GetCell gets the Cell value at the given Coord, or panics if not in range
 func (gm GameMap) GetCell(pos Coord) Cell {
-	return gm.cells[pos.x+(pos.y*gm.width)]
+	return gm.cells[gm.GetAbsolutePosition(pos)]
 }
 
 // GetCoord returns the (x,y) translation for the provided 1-dimensional position, based on the width and height values for this GameMap
@@ -90,6 +90,19 @@ func (gm GameMap) VisibleCells(pos Coord) (visibleCoords []Coord) {
 	return
 }
 
+// Wrap normalizes a coordinate that may be outside of the bounds of the map by wrapping it around to the other side
+func (gm GameMap) Wrap(coord Coord) Coord {
+	_wrap := func(d, m int) int {
+		var res int = d % m
+		if (res < 0 && m > 0) || (res > 0 && m < 0) {
+			return res + m
+		}
+		return res
+	}
+
+	return Coord{_wrap(coord.x, gm.width), _wrap(coord.y, gm.height)}
+}
+
 // GameData represents a snapshot of the game at a point in time
 type GameData struct {
 	round          int
@@ -107,6 +120,54 @@ type Agent interface {
 //-----------------------------------------------------------------------------------
 // general utility stuff
 //-----------------------------------------------------------------------------------
+
+func enemiesWithinRange(gameMap GameMap, pacsByPosition map[Coord]Pac, pos Coord, distance int) []Pac {
+	type SearchNode struct {
+		pos   Coord
+		depth int
+	}
+
+	queue := []SearchNode{{pos, 0}}
+	// list of nodes already visited to avoid cycles
+	visited := map[Coord]bool{pos: true}
+
+	enemies := []Pac{}
+
+	for len(queue) > 0 {
+		// queue.peek
+		node := queue[0]
+		// queue.dequeue
+		queue = queue[1:]
+
+		// if this position contains an enemy pac, add it to our list of enemies
+		pac, isPacPresent := pacsByPosition[node.pos]
+		if isPacPresent && !pac.mine {
+			enemies = append(enemies, pac)
+		}
+
+		// walk each orthogonal (x, y) coordinate
+		for dx := -1; dx <= 1; dx++ {
+			for dy := -1; dy <= 1; dy++ {
+				dPos := gameMap.Wrap(Coord{node.pos.x + dx, node.pos.y + dy})
+				alreadyVisited := visited[dPos]
+				// if we haven't visited this coordinate before in this search
+				if !alreadyVisited {
+					visited[dPos] = true
+					cell := gameMap.GetCell(dPos)
+					// if the cell is a floor (instead of a wall)
+					if cell.value == ' ' {
+						// don't process nodes that are farther away than our max distance
+						if node.depth+1 <= distance {
+							queue = append(queue, SearchNode{dPos, node.depth + 1})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return enemies
+}
 
 // sortCoordsByProximity sorts the pellets by distance squared to the given position
 func sortCoordsByProximity(coords []Coord, pos Coord) {
@@ -147,6 +208,7 @@ func joinStrings(elems ...interface{}) string {
 // DansLilHeuristicBot is just a lil guy tryina eat some pellets
 type DansLilHeuristicBot struct {
 	pelletValuesByPos []int
+	pacsByPos         map[Coord]Pac
 }
 
 func (bot *DansLilHeuristicBot) init(gameMap GameMap) {
@@ -160,13 +222,14 @@ func (bot *DansLilHeuristicBot) init(gameMap GameMap) {
 		}
 		bot.pelletValuesByPos[pos] = value
 	}
+	bot.pacsByPos = make(map[Coord]Pac)
 }
 
 func (bot *DansLilHeuristicBot) update(gameData GameData) {
 	// clear all known pellet values for all currently visible cells -- we'll replace the existing values based on observed data next
 	for _, pac := range gameData.visiblePacs {
-		// don't clear cells for opponents, since we don't have their line of sight
-		if pac.player == 1 {
+		// only clear cells for my pacs
+		if pac.mine {
 			for _, coord := range gameData.gameMap.VisibleCells(pac.pos) {
 				bot.pelletValuesByPos[gameData.gameMap.GetAbsolutePosition(coord)] = 0
 			}
@@ -176,6 +239,12 @@ func (bot *DansLilHeuristicBot) update(gameData GameData) {
 	for _, pellet := range gameData.visiblePellets {
 		bot.pelletValuesByPos[gameData.gameMap.GetAbsolutePosition(pellet.pos)] = pellet.value
 	}
+
+	// update pacs by position
+	bot.pacsByPos = make(map[Coord]Pac)
+	for _, pac := range gameData.visiblePacs {
+		bot.pacsByPos[pac.pos] = pac
+	}
 }
 
 func (bot DansLilHeuristicBot) makeCommand(gameData GameData) string {
@@ -184,11 +253,12 @@ func (bot DansLilHeuristicBot) makeCommand(gameData GameData) string {
 	var myPacs []Pac
 	// find all of my pacs from the visible collection
 	for _, pac := range gameData.visiblePacs {
-		if pac.player == 1 {
+		if pac.mine {
 			myPacs = append(myPacs, pac)
 		}
 	}
 
+	// partition pellets into mutually exclusive zones for each pac
 	pelletsByArea := make([][]Coord, len(myPacs))
 	for pos, pelletValue := range bot.pelletValuesByPos {
 		if pelletValue > 0 {
@@ -206,19 +276,29 @@ func (bot DansLilHeuristicBot) makeCommand(gameData GameData) string {
 		} else {
 			var pos Coord
 			var status string
-			// choose closest pellet
-			if len(pelletsByArea[iPac]) > 0 {
-				sortCoordsByProximity(pelletsByArea[iPac], pac.pos)
-				pos = pelletsByArea[iPac][0]
-				status = joinStrings("P", len(pelletsByArea[iPac]))
+
+			// find any enemies within "striking distance"
+			enemies := enemiesWithinRange(gameData.gameMap, bot.pacsByPos, pac.pos, 2)
+
+			// attack! (then later do something more intelligent)
+			if len(enemies) > 0 {
+				pos = enemies[0].pos
+				status = "HAVE AT YOU!"
 			} else {
-				// wander aimlessly, hoping to find more delicious pellets
-				coord := func(x int) int {
-					return rand.Intn(x/len(myPacs)) + (iPac * x / len(myPacs))
+				// choose closest pellet
+				if len(pelletsByArea[iPac]) > 0 {
+					sortCoordsByProximity(pelletsByArea[iPac], pac.pos)
+					pos = pelletsByArea[iPac][0]
+					status = joinStrings("P", len(pelletsByArea[iPac]))
+				} else {
+					// wander aimlessly, hoping to find more delicious pellets
+					coord := func(x int) int {
+						return rand.Intn(x/len(myPacs)) + (iPac * x / len(myPacs))
+					}
+					x, y := coord(gameData.gameMap.width), coord(gameData.gameMap.height)
+					pos = Coord{x, y}
+					status = joinStrings("S", x, y)
 				}
-				x, y := coord(gameData.gameMap.width), coord(gameData.gameMap.height)
-				pos = Coord{x, y}
-				status = joinStrings("S", x, y)
 			}
 			actions = append(actions, joinStrings("MOVE", pac.id, pos.x, pos.y, iPac, status))
 		}
@@ -287,7 +367,7 @@ func main() {
 			scanner.Scan()
 			fmt.Sscan(scanner.Text(), &pacID, &player, &x, &y, &typeID, &speedTurnsLeft, &abilityCooldown)
 
-			visiblePacs = append(visiblePacs, Pac{pacID, player, Coord{x, y}, typeID, speedTurnsLeft, abilityCooldown})
+			visiblePacs = append(visiblePacs, Pac{pacID, player == 1, Coord{x, y}, typeID, speedTurnsLeft, abilityCooldown})
 		}
 		// visiblePelletCount: all pellets in sight
 		var visiblePelletCount int

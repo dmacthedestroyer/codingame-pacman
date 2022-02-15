@@ -102,3 +102,29 @@ func TestVisibleCells(t *testing.T) {
 		})
 	}
 }
+
+func TestWrap(t *testing.T) {
+	gm := GameMap{width: 10, height: 5}
+
+	type TestCase struct {
+		description string
+		unwrapped   Coord
+		expected    Coord
+	}
+	tests := []TestCase{
+		{"within bounds", Coord{2, 2}, Coord{2, 2}},
+		{"y < 0", Coord{0, -2}, Coord{0, 3}},
+		{"y < height * -2", Coord{0, -8}, Coord{0, 2}},
+		{"y > height", Coord{1, 7}, Coord{1, 2}},
+		{"y > height * 2", Coord{0, 9}, Coord{0, 4}},
+		{"x < 0", Coord{-4, 0}, Coord{6, 0}},
+		{"x < width * -2", Coord{-12, 0}, Coord{8, 0}},
+	}
+
+	for i, testCase := range tests {
+		actual := gm.Wrap(testCase.unwrapped)
+		if actual != testCase.expected {
+			t.Errorf("%d: expected Wrap(%v) = %v, but was %v", i, testCase.unwrapped, testCase.expected, actual)
+		}
+	}
+}
