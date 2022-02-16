@@ -14,11 +14,18 @@ type Coord struct{ x, y int }
 
 // Pac represents a Pac man (or woman)
 type Pac struct {
-	id                              int
-	mine                            bool
-	pos                             Coord
-	typeID                          string
-	speedTurnsLeft, abilityCooldown int
+	// id is the pac's id (unique for a given player)
+	id int
+	// mine is true if this pac belongs to the player
+	mine bool
+	// pos is the pac's positoin
+	pos Coord
+	// typeID is the pac's type (ROCK or PAPER or SCISSORS). In the next league, a pac that has died will be of type DEAD.
+	typeID string
+	// speedTurnsLeft is the number of remaining turns before the speed effect fades
+	speedTurnsLeft int
+	// abilityCooldown is the number of turns until you can request a new ability for this pac (SWITCH and SPEED)
+	abilityCooldown int
 }
 
 // Pellet represents a pellet with a location and point value
@@ -121,6 +128,8 @@ type Agent interface {
 // general utility stuff
 //-----------------------------------------------------------------------------------
 
+// enemiesWithinRange returns all enemies within the given distance, sorted by distance
+// TODO: more tests
 func enemiesWithinRange(gameMap GameMap, pacsByPosition map[Coord]Pac, pos Coord, distance int) []Pac {
 	type SearchNode struct {
 		pos   Coord
@@ -167,6 +176,52 @@ func enemiesWithinRange(gameMap GameMap, pacsByPosition map[Coord]Pac, pos Coord
 	}
 
 	return enemies
+}
+
+func getWinningTypeId(typeId string) string {
+	if typeId == "ROCK" {
+		return "PAPER"
+	} else if typeId == "PAPER" {
+		return "SCISSORS"
+	} else if typeId == "SCISSORS" {
+		return "ROCK"
+	} else {
+		panic(fmt.Sprintf("unknown typeId: %v", typeId))
+	}
+}
+
+// awayFrom returns a traversable coordinate one move away from me in the opposite direction of them
+func awayFrom(me Coord, them Coord, gameMap GameMap) Coord {
+	dx := []int{0}
+	dy := []int{0}
+
+	// TODO: doesn't account for wrapping around the map
+	if them.x >= me.x {
+		dx = append(dx, -1)
+	}
+	if them.x <= me.x {
+		dx = append(dx, +1)
+	}
+	if them.y >= me.y {
+		dy = append(dy, -1)
+	}
+	if them.y <= me.y {
+		dy = append(dy, +1)
+	}
+
+	for _, newX := range dx {
+		for _, newY := range dy {
+			if newX != 0 || newY != 0 {
+				newCoord := gameMap.Wrap(Coord{me.x + newX, me.y + newY})
+				if gameMap.GetCell(newCoord).value == ' ' {
+					return newCoord
+				}
+			}
+		}
+	}
+
+	// ¯\_(ツ)_/¯
+	return me
 }
 
 // sortCoordsByProximity sorts the pellets by distance squared to the given position
@@ -270,37 +325,47 @@ func (bot DansLilHeuristicBot) makeCommand(gameData GameData) string {
 
 	var actions []string
 	for iPac, pac := range myPacs {
-		if pac.abilityCooldown <= 0 {
-			// they're speedy lil devils, these Pacs
-			actions = append(actions, fmt.Sprint("SPEED ", pac.id))
-		} else {
-			var pos Coord
-			var status string
+		speed := func(status string) string { return joinStrings("SPEED ", pac.id, status) }
+		move := func(pos Coord, status string) string { return joinStrings("MOVE", pac.id, pos.x, pos.y, iPac, status) }
+		switchType := func(typeId string) string { return joinStrings("SWITCH", pac.id, typeId) }
+		var action string
 
-			// find any enemies within "striking distance"
-			enemies := enemiesWithinRange(gameData.gameMap, bot.pacsByPos, pac.pos, 2)
+		// find any enemies within "striking distance"
+		enemies := enemiesWithinRange(gameData.gameMap, bot.pacsByPos, pac.pos, 2)
 
-			// attack! (then later do something more intelligent)
-			if len(enemies) > 0 {
-				pos = enemies[0].pos
-				status = "HAVE AT YOU!"
-			} else {
-				// choose closest pellet
-				if len(pelletsByArea[iPac]) > 0 {
-					sortCoordsByProximity(pelletsByArea[iPac], pac.pos)
-					pos = pelletsByArea[iPac][0]
-					status = joinStrings("P", len(pelletsByArea[iPac]))
+		// attack! (then later do something more intelligent)
+		if len(enemies) > 0 {
+			nearest := enemies[0]
+			winningTypeId := getWinningTypeId(nearest.typeID)
+			if winningTypeId == pac.typeID {
+				if pac.abilityCooldown <= 0 {
+					action = speed("ZOOM")
 				} else {
-					// wander aimlessly, hoping to find more delicious pellets
-					coord := func(x int) int {
-						return rand.Intn(x/len(myPacs)) + (iPac * x / len(myPacs))
-					}
-					x, y := coord(gameData.gameMap.width), coord(gameData.gameMap.height)
-					pos = Coord{x, y}
-					status = joinStrings("S", x, y)
+					action = move(nearest.pos, "NOM")
 				}
+			} else if pac.abilityCooldown <= 0 {
+				action = switchType(winningTypeId)
+			} else {
+				action = move(awayFrom(pac.pos, nearest.pos, gameData.gameMap), "EEK!")
 			}
-			actions = append(actions, joinStrings("MOVE", pac.id, pos.x, pos.y, iPac, status))
+
+		} else {
+			// choose closest pellet TODO: fix locking conditions
+			if len(pelletsByArea[iPac]) > 0 {
+				sortCoordsByProximity(pelletsByArea[iPac], pac.pos)
+				action = move(pelletsByArea[iPac][0], joinStrings("P", len(pelletsByArea[iPac])))
+			} else {
+				// wander aimlessly, hoping to find more delicious pellets
+				coord := func(x int) int {
+					return rand.Intn(x/len(myPacs)) + (iPac * x / len(myPacs))
+				}
+				x, y := coord(gameData.gameMap.width), coord(gameData.gameMap.height)
+				action = move(Coord{x, y}, joinStrings("S", x, y))
+			}
+		}
+
+		if len(action) > 0 {
+			actions = append(actions, action)
 		}
 	}
 
