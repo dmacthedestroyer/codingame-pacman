@@ -128,6 +128,19 @@ type Agent interface {
 // general utility stuff
 //-----------------------------------------------------------------------------------
 
+func adjacentCoords(pos Coord) []Coord {
+	adjacents := []Coord{}
+
+	for dx := -1; dx <= 1; dx++ {
+		for dy := -1; dy <= 1; dy++ {
+			if dx != 0 || dy != 0 {
+				adjacents = append(adjacents, Coord{pos.x + dx, pos.y + dy})
+			}
+		}
+	}
+	return adjacents
+}
+
 // enemiesWithinRange returns all enemies within the given distance, sorted by distance
 // TODO: more tests
 func enemiesWithinRange(gameMap GameMap, pacsByPosition map[Coord]Pac, pos Coord, distance int) []Pac {
@@ -155,20 +168,18 @@ func enemiesWithinRange(gameMap GameMap, pacsByPosition map[Coord]Pac, pos Coord
 		}
 
 		// walk each orthogonal (x, y) coordinate
-		for dx := -1; dx <= 1; dx++ {
-			for dy := -1; dy <= 1; dy++ {
-				dPos := gameMap.Wrap(Coord{node.pos.x + dx, node.pos.y + dy})
-				alreadyVisited := visited[dPos]
-				// if we haven't visited this coordinate before in this search
-				if !alreadyVisited {
-					visited[dPos] = true
-					cell := gameMap.GetCell(dPos)
-					// if the cell is a floor (instead of a wall)
-					if cell.value == ' ' {
-						// don't process nodes that are farther away than our max distance
-						if node.depth+1 <= distance {
-							queue = append(queue, SearchNode{dPos, node.depth + 1})
-						}
+		for _, adjacent := range adjacentCoords(node.pos) {
+			dPos := gameMap.Wrap(adjacent)
+			alreadyVisited := visited[dPos]
+			// if we haven't visited this coordinate before in this search
+			if !alreadyVisited {
+				visited[dPos] = true
+				cell := gameMap.GetCell(dPos)
+				// if the cell is a floor (instead of a wall)
+				if cell.value == ' ' {
+					// don't process nodes that are farther away than our max distance
+					if node.depth+1 <= distance {
+						queue = append(queue, SearchNode{dPos, node.depth + 1})
 					}
 				}
 			}
@@ -224,12 +235,24 @@ func awayFrom(me Coord, them Coord, gameMap GameMap) Coord {
 	return me
 }
 
-// sortCoordsByProximity sorts the pellets by distance squared to the given position
-func sortCoordsByProximity(coords []Coord, pos Coord) {
-	sort.Slice(coords, func(i, j int) bool {
-		iCoord, jCoord := coords[i], coords[j]
-		iDist, jDist := iCoord.distanceSquared(pos), jCoord.distanceSquared(pos)
-		return iDist < jDist
+// sortCoords sorts (in place) area by value, then distance
+func sortCoords(area []Coord, pos Coord, pelletValuesByPos map[Coord]int) {
+	sort.Slice(area, func(i, j int) bool {
+		iCoord, jCoord := area[i], area[j]
+		iValue, iExists := pelletValuesByPos[iCoord]
+		jValue, jExists := pelletValuesByPos[jCoord]
+		if !iExists && jExists {
+			return true
+		} else if iExists && !jExists {
+			return false
+		} else if iValue < jValue {
+			return false
+		} else if iValue > jValue {
+			return true
+		} else {
+			iDistance, jDistance := iCoord.distanceSquared(pos), jCoord.distanceSquared(pos)
+			return iDistance < jDistance
+		}
 	})
 }
 
@@ -262,13 +285,18 @@ func joinStrings(elems ...interface{}) string {
 
 // DansLilHeuristicBot is just a lil guy tryina eat some pellets
 type DansLilHeuristicBot struct {
+	// pelletValuesByPos keeps track of each pellet value based on its absolute position in the grid
 	pelletValuesByPos []int
-	pacsByPos         map[Coord]Pac
+	// pelletValuesByCoord keeps track of each pellet value based on its coordinate position. I made this because I regretted storing the info in an array in pelletValuesByPos
+	pelletValuesByCoord map[Coord]int
+	pacsByPos           map[Coord]Pac
 }
 
 func (bot *DansLilHeuristicBot) init(gameMap GameMap) {
 	bot.pelletValuesByPos = make([]int, gameMap.width*gameMap.height)
+	bot.pelletValuesByCoord = make(map[Coord]int, gameMap.width*gameMap.height)
 	for pos, cell := range gameMap.cells {
+		coord := gameMap.GetCoord(pos)
 		var value int
 		if cell.value == ' ' {
 			value = 1
@@ -276,6 +304,7 @@ func (bot *DansLilHeuristicBot) init(gameMap GameMap) {
 			value = 0
 		}
 		bot.pelletValuesByPos[pos] = value
+		bot.pelletValuesByCoord[coord] = value
 	}
 	bot.pacsByPos = make(map[Coord]Pac)
 }
@@ -293,6 +322,7 @@ func (bot *DansLilHeuristicBot) update(gameData GameData) {
 	// update pellet values for all visible pellets
 	for _, pellet := range gameData.visiblePellets {
 		bot.pelletValuesByPos[gameData.gameMap.GetAbsolutePosition(pellet.pos)] = pellet.value
+		bot.pelletValuesByCoord[pellet.pos] = pellet.value
 	}
 
 	// update pacs by position
@@ -331,9 +361,7 @@ func (bot DansLilHeuristicBot) makeCommand(gameData GameData) string {
 		var action string
 
 		// find any enemies within "striking distance"
-		enemies := enemiesWithinRange(gameData.gameMap, bot.pacsByPos, pac.pos, 2)
-
-		// attack! (then later do something more intelligent)
+		enemies := enemiesWithinRange(gameData.gameMap, bot.pacsByPos, pac.pos, 4)
 		if len(enemies) > 0 {
 			nearest := enemies[0]
 			winningTypeId := getWinningTypeId(nearest.typeID)
@@ -348,11 +376,11 @@ func (bot DansLilHeuristicBot) makeCommand(gameData GameData) string {
 			} else {
 				action = move(awayFrom(pac.pos, nearest.pos, gameData.gameMap), "EEK!")
 			}
-
 		} else {
 			// choose closest pellet TODO: fix locking conditions
-			if len(pelletsByArea[iPac]) > 0 {
-				sortCoordsByProximity(pelletsByArea[iPac], pac.pos)
+			myArea := pelletsByArea[iPac]
+			if len(myArea) > 0 {
+				sortCoords(myArea, pac.pos, bot.pelletValuesByCoord)
 				action = move(pelletsByArea[iPac][0], joinStrings("P", len(pelletsByArea[iPac])))
 			} else {
 				// wander aimlessly, hoping to find more delicious pellets
